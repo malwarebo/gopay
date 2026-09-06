@@ -12,7 +12,7 @@ type ErrorResponse struct {
 }
 
 type WebhookValidator interface {
-	ValidateWebhookSignature(payload []byte, signature string) error
+	ValidateWebhookSignature(payload []byte, signature, timestamp string) error
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {

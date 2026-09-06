@@ -35,7 +35,7 @@ func (h *WebhookHandler) HandleStripeWebhook(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := h.stripeProvider.ValidateWebhookSignature(payload, signature); err != nil {
+	if err := h.stripeProvider.ValidateWebhookSignature(payload, signature, ""); err != nil {
 		http.Error(w, "Invalid webhook signature", http.StatusUnauthorized)
 		return
 	}
@@ -78,7 +78,7 @@ func (h *WebhookHandler) HandleXenditWebhook(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := h.xenditProvider.ValidateWebhookSignature(payload, signature); err != nil {
+	if err := h.xenditProvider.ValidateWebhookSignature(payload, signature, ""); err != nil {
 		http.Error(w, "Invalid webhook signature", http.StatusUnauthorized)
 		return
 	}

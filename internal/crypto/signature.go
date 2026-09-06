@@ -4,7 +4,18 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"strconv"
+	"time"
+)
+
+const DefaultTimestampTolerance = 5 * time.Minute
+
+var (
+	ErrMissingTimestamp          = errors.New("webhook timestamp missing")
+	ErrInvalidTimestamp          = errors.New("webhook timestamp malformed")
+	ErrTimestampOutsideTolerance = errors.New("webhook timestamp outside tolerance window")
 )
 
 func ValidateHMACSHA256(payload []byte, signature, secret string) error {
@@ -21,6 +32,35 @@ func ValidateHMACSHA256(payload []byte, signature, secret string) error {
 	}
 
 	return nil
+}
+
+func ValidateTimestamp(timestamp string, tolerance time.Duration) error {
+	if timestamp == "" {
+		return ErrMissingTimestamp
+	}
+
+	seconds, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil {
+		return ErrInvalidTimestamp
+	}
+
+	drift := time.Since(time.Unix(seconds, 0))
+	if drift < 0 {
+		drift = -drift
+	}
+	if drift > tolerance {
+		return ErrTimestampOutsideTolerance
+	}
+
+	return nil
+}
+
+func ValidateHMACSHA256WithTimestamp(payload []byte, signature, secret, timestamp string, tolerance time.Duration) error {
+	if err := ValidateTimestamp(timestamp, tolerance); err != nil {
+		return err
+	}
+
+	return ValidateHMACSHA256(append([]byte(timestamp), payload...), signature, secret)
 }
 
 func GenerateHMACSHA256(payload []byte, secret string) string {

@@ -17,6 +17,14 @@ type PaymentHandler struct {
 	webhookValidators map[string]WebhookValidator
 }
 
+type webhookSource struct {
+	provider        string
+	signatureHeader string
+	timestampHeader string
+	eventTypeKey    string
+	extractEventID  func(event map[string]interface{}) string
+}
+
 func CreatePaymentHandler(paymentService *services.PaymentService) *PaymentHandler {
 	return &PaymentHandler{
 		paymentService: paymentService,
@@ -341,92 +349,43 @@ func (h *PaymentHandler) HandleRefund(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PaymentHandler) HandleStripeWebhook(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	payload, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Failed to read request body"})
-		return
-	}
-
-	if validator, ok := h.webhookValidators["stripe"]; ok {
-		signature := r.Header.Get("Stripe-Signature")
-		if err := validator.ValidateWebhookSignature(payload, signature); err != nil {
-			writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Invalid webhook signature"})
-			return
-		}
-	}
-
-	var event map[string]interface{}
-	if err := json.Unmarshal(payload, &event); err != nil {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid JSON payload"})
-		return
-	}
-
-	eventID, _ := event["id"].(string)
-	eventType, _ := event["type"].(string)
-
-	if h.webhookService != nil {
-		if err := h.webhookService.ProcessInboundWebhook(r.Context(), "stripe", eventID, eventType, payload); err != nil {
-			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to process webhook"})
-			return
-		}
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"received":   true,
-		"event_id":   eventID,
-		"event_type": eventType,
+	h.handleProviderWebhook(w, r, webhookSource{
+		provider:        "stripe",
+		signatureHeader: "Stripe-Signature",
+		eventTypeKey:    "type",
+		extractEventID:  topLevelEventID,
 	})
 }
 
 func (h *PaymentHandler) HandleXenditWebhook(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	payload, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Failed to read request body"})
-		return
-	}
-
-	if validator, ok := h.webhookValidators["xendit"]; ok {
-		signature := r.Header.Get("x-callback-token")
-		if err := validator.ValidateWebhookSignature(payload, signature); err != nil {
-			writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Invalid webhook signature"})
-			return
-		}
-	}
-
-	var event map[string]interface{}
-	if err := json.Unmarshal(payload, &event); err != nil {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid JSON payload"})
-		return
-	}
-
-	eventID, _ := event["id"].(string)
-	eventType, _ := event["event"].(string)
-
-	if h.webhookService != nil {
-		if err := h.webhookService.ProcessInboundWebhook(r.Context(), "xendit", eventID, eventType, payload); err != nil {
-			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to process webhook"})
-			return
-		}
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"received":   true,
-		"event_id":   eventID,
-		"event_type": eventType,
+	h.handleProviderWebhook(w, r, webhookSource{
+		provider:        "xendit",
+		signatureHeader: "x-callback-token",
+		eventTypeKey:    "event",
+		extractEventID:  topLevelEventID,
 	})
 }
 
 func (h *PaymentHandler) HandleRazorpayWebhook(w http.ResponseWriter, r *http.Request) {
+	h.handleProviderWebhook(w, r, webhookSource{
+		provider:        "razorpay",
+		signatureHeader: "X-Razorpay-Signature",
+		eventTypeKey:    "event",
+		extractEventID:  razorpayEventID,
+	})
+}
+
+func (h *PaymentHandler) HandleAirwallexWebhook(w http.ResponseWriter, r *http.Request) {
+	h.handleProviderWebhook(w, r, webhookSource{
+		provider:        "airwallex",
+		signatureHeader: "x-signature",
+		timestampHeader: "x-timestamp",
+		eventTypeKey:    "name",
+		extractEventID:  topLevelEventID,
+	})
+}
+
+func (h *PaymentHandler) handleProviderWebhook(w http.ResponseWriter, r *http.Request, src webhookSource) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -438,9 +397,13 @@ func (h *PaymentHandler) HandleRazorpayWebhook(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if validator, ok := h.webhookValidators["razorpay"]; ok {
-		signature := r.Header.Get("X-Razorpay-Signature")
-		if err := validator.ValidateWebhookSignature(payload, signature); err != nil {
+	if validator, ok := h.webhookValidators[src.provider]; ok {
+		signature := r.Header.Get(src.signatureHeader)
+		timestamp := ""
+		if src.timestampHeader != "" {
+			timestamp = r.Header.Get(src.timestampHeader)
+		}
+		if err := validator.ValidateWebhookSignature(payload, signature, timestamp); err != nil {
 			writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Invalid webhook signature"})
 			return
 		}
@@ -452,26 +415,11 @@ func (h *PaymentHandler) HandleRazorpayWebhook(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	eventType, _ := event["event"].(string)
-	eventID := ""
-	if payloadData, ok := event["payload"].(map[string]interface{}); ok {
-		if payment, ok := payloadData["payment"].(map[string]interface{}); ok {
-			if entity, ok := payment["entity"].(map[string]interface{}); ok {
-				eventID, _ = entity["id"].(string)
-			}
-		} else if order, ok := payloadData["order"].(map[string]interface{}); ok {
-			if entity, ok := order["entity"].(map[string]interface{}); ok {
-				eventID, _ = entity["id"].(string)
-			}
-		} else if subscription, ok := payloadData["subscription"].(map[string]interface{}); ok {
-			if entity, ok := subscription["entity"].(map[string]interface{}); ok {
-				eventID, _ = entity["id"].(string)
-			}
-		}
-	}
+	eventType, _ := event[src.eventTypeKey].(string)
+	eventID := src.extractEventID(event)
 
 	if h.webhookService != nil {
-		if err := h.webhookService.ProcessInboundWebhook(r.Context(), "razorpay", eventID, eventType, payload); err != nil {
+		if err := h.webhookService.ProcessInboundWebhook(r.Context(), src.provider, eventID, eventType, payload); err != nil {
 			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to process webhook"})
 			return
 		}
@@ -484,45 +432,27 @@ func (h *PaymentHandler) HandleRazorpayWebhook(w http.ResponseWriter, r *http.Re
 	})
 }
 
-func (h *PaymentHandler) HandleAirwallexWebhook(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+func topLevelEventID(event map[string]interface{}) string {
+	id, _ := event["id"].(string)
+	return id
+}
+
+func razorpayEventID(event map[string]interface{}) string {
+	payloadData, ok := event["payload"].(map[string]interface{})
+	if !ok {
+		return ""
 	}
 
-	payload, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Failed to read request body"})
-		return
-	}
-
-	if validator, ok := h.webhookValidators["airwallex"]; ok {
-		signature := r.Header.Get("x-signature")
-		if err := validator.ValidateWebhookSignature(payload, signature); err != nil {
-			writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Invalid webhook signature"})
-			return
+	for _, key := range []string{"payment", "order", "subscription"} {
+		entityWrapper, ok := payloadData[key].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if entity, ok := entityWrapper["entity"].(map[string]interface{}); ok {
+			id, _ := entity["id"].(string)
+			return id
 		}
 	}
 
-	var event map[string]interface{}
-	if err := json.Unmarshal(payload, &event); err != nil {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "Invalid JSON payload"})
-		return
-	}
-
-	eventType, _ := event["name"].(string)
-	eventID, _ := event["id"].(string)
-
-	if h.webhookService != nil {
-		if err := h.webhookService.ProcessInboundWebhook(r.Context(), "airwallex", eventID, eventType, payload); err != nil {
-			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to process webhook"})
-			return
-		}
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"received":   true,
-		"event_id":   eventID,
-		"event_type": eventType,
-	})
+	return ""
 }
