@@ -30,7 +30,7 @@ type Plan struct {
 	ID            string        `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
 	Name          string        `json:"name" gorm:"not null"`
 	Description   string        `json:"description"`
-	Amount        float64       `json:"amount" gorm:"not null"`
+	Amount        int64         `json:"amount" gorm:"not null"`
 	Currency      string        `json:"currency" gorm:"not null"`
 	BillingPeriod BillingPeriod `json:"billing_period" gorm:"not null"`
 	PricingType   PricingType   `json:"pricing_type" gorm:"not null"`
@@ -94,7 +94,7 @@ type SubscriptionResponse struct {
 
 type CreatePlanRequest struct {
 	Name      string      `json:"name"`
-	Amount    float64     `json:"amount"`
+	Amount    int64       `json:"amount"`
 	Currency  string      `json:"currency"`
 	Interval  string      `json:"interval"`
 	TrialDays int         `json:"trial_days,omitempty"`
@@ -103,7 +103,7 @@ type CreatePlanRequest struct {
 
 type UpdatePlanRequest struct {
 	Name      string      `json:"name,omitempty"`
-	Amount    float64     `json:"amount,omitempty"`
+	Amount    int64       `json:"amount,omitempty"`
 	Currency  string      `json:"currency,omitempty"`
 	Interval  string      `json:"interval,omitempty"`
 	TrialDays int         `json:"trial_days,omitempty"`

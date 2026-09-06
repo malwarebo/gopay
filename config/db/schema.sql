@@ -41,7 +41,7 @@ CREATE TABLE subscriptions (
 -- Payments table
 CREATE TABLE payments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    amount DECIMAL(10,2) NOT NULL,
+    amount BIGINT NOT NULL,
     currency VARCHAR(3) NOT NULL,
     customer_id VARCHAR(255) NOT NULL,
     payment_method VARCHAR(255) NOT NULL,
@@ -58,7 +58,7 @@ CREATE TABLE payments (
 CREATE TABLE refunds (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     payment_id UUID NOT NULL,
-    amount DECIMAL(10,2) NOT NULL,
+    amount BIGINT NOT NULL,
     reason TEXT,
     status VARCHAR(50) NOT NULL,
     provider VARCHAR(50) NOT NULL,
