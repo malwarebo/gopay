@@ -107,10 +107,10 @@ func (s *PaymentService) CreateCharge(ctx context.Context, req *models.ChargeReq
 		return nil, fmt.Errorf("failed to create charge with provider: %w", err)
 	}
 
-	tenantID := ctx.Value(ctxkeys.TenantID)
+	tenantID := tenantIDFromContext(ctx)
 	var tenantIDPtr *string
-	if tid, ok := tenantID.(string); ok && tid != "" {
-		tenantIDPtr = &tid
+	if tenantID != "" {
+		tenantIDPtr = &tenantID
 	}
 
 	payment = &models.Payment{
@@ -409,25 +409,26 @@ func (s *PaymentService) ListPaymentSessions(ctx context.Context, req *models.Li
 	return nil, errors.New("provider does not support payment sessions")
 }
 
+func tenantIDFromContext(ctx context.Context) string {
+	tenantID, _ := ctx.Value(ctxkeys.TenantID).(string)
+	return tenantID
+}
+
 func (s *PaymentService) checkIdempotency(ctx context.Context, key, path string, req interface{}) (*models.IdempotencyResult, error) {
 	if s.idempotencyStore == nil {
 		return &models.IdempotencyResult{IsNew: true}, nil
 	}
 
 	reqBody, _ := json.Marshal(req)
-	tenantID := ""
-	if tid := ctx.Value(ctxkeys.TenantID); tid != nil {
-		tenantID = tid.(string)
-	}
 
-	return s.idempotencyStore.GetOrCreate(ctx, key, tenantID, path, reqBody, 24*time.Hour)
+	return s.idempotencyStore.GetOrCreate(ctx, key, tenantIDFromContext(ctx), path, reqBody, 24*time.Hour)
 }
 
 func (s *PaymentService) completeIdempotency(ctx context.Context, key string, code int, response interface{}) error {
 	if s.idempotencyStore == nil || key == "" {
 		return nil
 	}
-	return s.idempotencyStore.Complete(ctx, key, code, response)
+	return s.idempotencyStore.Complete(ctx, key, tenantIDFromContext(ctx), code, response)
 }
 
 func (s *PaymentService) validateChargeRequest(req *models.ChargeRequest) error {

@@ -76,9 +76,9 @@ func (r *PaymentRepository) GetByProviderChargeID(ctx context.Context, providerC
 	return &payment, nil
 }
 
-func (r *PaymentRepository) GetByIdempotencyKey(ctx context.Context, idempotencyKey string) (*models.Payment, error) {
+func (r *PaymentRepository) GetByIdempotencyKey(ctx context.Context, idempotencyKey, tenantID string) (*models.Payment, error) {
 	var payment models.Payment
-	if err := r.GetDB(ctx).Where("idempotency_key = ?", idempotencyKey).First(&payment).Error; err != nil {
+	if err := r.GetDB(ctx).Where("idempotency_key = ? AND (tenant_id = ? OR (tenant_id IS NULL AND ? = ''))", idempotencyKey, tenantID, tenantID).First(&payment).Error; err != nil {
 		return nil, err
 	}
 	return &payment, nil

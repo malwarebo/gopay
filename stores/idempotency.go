@@ -19,14 +19,16 @@ func CreateIdempotencyStore(db *gorm.DB) *IdempotencyStore {
 	return &IdempotencyStore{BaseStore: BaseStore{db: db}}
 }
 
+func (s *IdempotencyStore) scopeToKey(ctx context.Context, key, tenantID string) *gorm.DB {
+	return s.GetDB(ctx).Where("key = ? AND (tenant_id = ? OR (tenant_id IS NULL AND ? = ''))", key, tenantID, tenantID)
+}
+
 func (s *IdempotencyStore) GetOrCreate(ctx context.Context, key, tenantID, requestPath string, requestBody []byte, ttl time.Duration) (*models.IdempotencyResult, error) {
 	requestHash := s.hashRequest(requestBody)
 	now := time.Now()
 
 	var existing models.IdempotencyKey
-	err := s.GetDB(ctx).
-		Where("key = ? AND (tenant_id = ? OR (tenant_id IS NULL AND ? = ''))", key, tenantID, tenantID).
-		First(&existing).Error
+	err := s.scopeToKey(ctx, key, tenantID).First(&existing).Error
 
 	if err == nil {
 		if existing.RequestHash != requestHash {
@@ -86,16 +88,15 @@ func (s *IdempotencyStore) GetOrCreate(ctx context.Context, key, tenantID, reque
 	}, nil
 }
 
-func (s *IdempotencyStore) Complete(ctx context.Context, key string, responseCode int, responseBody interface{}) error {
+func (s *IdempotencyStore) Complete(ctx context.Context, key, tenantID string, responseCode int, responseBody interface{}) error {
 	now := time.Now()
 	bodyJSON, err := json.Marshal(responseBody)
 	if err != nil {
 		return err
 	}
 
-	return s.GetDB(ctx).
+	return s.scopeToKey(ctx, key, tenantID).
 		Model(&models.IdempotencyKey{}).
-		Where("key = ?", key).
 		Updates(map[string]interface{}{
 			"response_code": responseCode,
 			"response_body": bodyJSON,
@@ -104,10 +105,9 @@ func (s *IdempotencyStore) Complete(ctx context.Context, key string, responseCod
 		}).Error
 }
 
-func (s *IdempotencyStore) Unlock(ctx context.Context, key string) error {
-	return s.GetDB(ctx).
+func (s *IdempotencyStore) Unlock(ctx context.Context, key, tenantID string) error {
+	return s.scopeToKey(ctx, key, tenantID).
 		Model(&models.IdempotencyKey{}).
-		Where("key = ?", key).
 		Update("locked_at", nil).Error
 }
 
