@@ -5,6 +5,7 @@ import (
 
 	"github.com/malwarebo/conductor/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type PaymentRepository struct {
@@ -26,6 +27,14 @@ func (r *PaymentRepository) Update(ctx context.Context, payment *models.Payment)
 func (r *PaymentRepository) GetByID(ctx context.Context, id string) (*models.Payment, error) {
 	var payment models.Payment
 	if err := r.GetDB(ctx).Preload("Refunds").First(&payment, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &payment, nil
+}
+
+func (r *PaymentRepository) GetByIDForUpdate(ctx context.Context, id string) (*models.Payment, error) {
+	var payment models.Payment
+	if err := r.GetDB(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&payment, "id = ?", id).Error; err != nil {
 		return nil, err
 	}
 	return &payment, nil

@@ -768,7 +768,7 @@ func (p *RazorpayProvider) CreatePlan(ctx context.Context, planReq *models.Plan)
 		"interval": 1,
 		"item": map[string]interface{}{
 			"name":     planReq.Name,
-			"amount":   convert.FloatToCents(planReq.Amount),
+			"amount":   planReq.Amount,
 			"currency": planReq.Currency,
 		},
 	}
@@ -846,7 +846,7 @@ func (p *RazorpayProvider) mapPlan(plan map[string]interface{}, originalReq *mod
 	if item, ok := plan["item"].(map[string]interface{}); ok {
 		result.Name = convert.StringFromMap(item, "name")
 		result.Currency = convert.StringFromMap(item, "currency")
-		result.Amount = convert.CentsToFloat(convert.Int64FromMap(item, "amount"))
+		result.Amount = convert.Int64FromMap(item, "amount")
 	}
 
 	if originalReq != nil {
@@ -1116,7 +1116,7 @@ func (p *RazorpayProvider) ExpirePaymentMethod(ctx context.Context, paymentMetho
 	return nil, ErrNotSupported
 }
 
-func (p *RazorpayProvider) ValidateWebhookSignature(payload []byte, signature string) error {
+func (p *RazorpayProvider) ValidateWebhookSignature(payload []byte, signature, timestamp string) error {
 	return crypto.ValidateHMACSHA256(payload, signature, p.webhookSecret)
 }
 

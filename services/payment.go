@@ -103,7 +103,7 @@ func (s *PaymentService) CreateCharge(ctx context.Context, req *models.ChargeReq
 	})
 
 	if err != nil {
-		s.completeIdempotency(ctx, req.IdempotencyKey, 500, nil)
+		_ = s.completeIdempotency(ctx, req.IdempotencyKey, 500, nil)
 		return nil, fmt.Errorf("failed to create charge with provider: %w", err)
 	}
 
@@ -135,12 +135,17 @@ func (s *PaymentService) CreateCharge(ctx context.Context, req *models.ChargeReq
 		CreatedAt:        time.Now(),
 	}
 
-	if err := s.paymentRepo.Create(ctx, payment); err != nil {
+	response := s.buildChargeResponse(payment)
+
+	err = s.paymentRepo.WithTransaction(ctx, func(txCtx context.Context) error {
+		if err := s.paymentRepo.Create(txCtx, payment); err != nil {
+			return err
+		}
+		return s.completeIdempotency(txCtx, req.IdempotencyKey, 200, response)
+	})
+	if err != nil {
 		return nil, err
 	}
-
-	response := s.buildChargeResponse(payment)
-	s.completeIdempotency(ctx, req.IdempotencyKey, 200, response)
 
 	return response, nil
 }
@@ -194,12 +199,21 @@ func (s *PaymentService) Capture(ctx context.Context, req *models.CaptureRequest
 		return nil, fmt.Errorf("failed to capture payment: %w", err)
 	}
 
-	payment.CapturedAmount = captureAmount
-	payment.Status = models.PaymentStatusSuccess
-
-	if err := s.paymentRepo.Update(ctx, payment); err != nil {
+	err = s.paymentRepo.WithTransaction(ctx, func(txCtx context.Context) error {
+		locked, err := s.paymentRepo.GetByIDForUpdate(txCtx, req.PaymentID)
+		if err != nil {
+			return err
+		}
+		locked.CapturedAmount = captureAmount
+		locked.Status = models.PaymentStatusSuccess
+		return s.paymentRepo.Update(txCtx, locked)
+	})
+	if err != nil {
 		return nil, err
 	}
+
+	payment.CapturedAmount = captureAmount
+	payment.Status = models.PaymentStatusSuccess
 
 	return &models.CaptureResponse{
 		ID:           payment.ID,
@@ -231,11 +245,19 @@ func (s *PaymentService) Void(ctx context.Context, req *models.VoidRequest) (*mo
 		return nil, fmt.Errorf("failed to void payment: %w", err)
 	}
 
-	payment.Status = models.PaymentStatusCanceled
-
-	if err := s.paymentRepo.Update(ctx, payment); err != nil {
+	err = s.paymentRepo.WithTransaction(ctx, func(txCtx context.Context) error {
+		locked, err := s.paymentRepo.GetByIDForUpdate(txCtx, req.PaymentID)
+		if err != nil {
+			return err
+		}
+		locked.Status = models.PaymentStatusCanceled
+		return s.paymentRepo.Update(txCtx, locked)
+	})
+	if err != nil {
 		return nil, err
 	}
+
+	payment.Status = models.PaymentStatusCanceled
 
 	return &models.VoidResponse{
 		ID:           payment.ID,
@@ -297,16 +319,27 @@ func (s *PaymentService) CreateRefund(ctx context.Context, req *models.RefundReq
 		CreatedAt:        time.Now(),
 	}
 
-	if err := s.paymentRepo.CreateRefund(ctx, refund); err != nil {
+	err = s.paymentRepo.WithTransaction(ctx, func(txCtx context.Context) error {
+		locked, err := s.paymentRepo.GetByIDForUpdate(txCtx, req.PaymentID)
+		if err != nil {
+			return err
+		}
+
+		if err := s.paymentRepo.CreateRefund(txCtx, refund); err != nil {
+			return err
+		}
+
+		if refund.Amount >= locked.Amount {
+			locked.Status = models.PaymentStatusRefunded
+		} else {
+			locked.Status = models.PaymentStatusPartiallyRefunded
+		}
+
+		return s.paymentRepo.Update(txCtx, locked)
+	})
+	if err != nil {
 		return nil, err
 	}
-
-	if refund.Amount >= payment.Amount {
-		payment.Status = models.PaymentStatusRefunded
-	} else {
-		payment.Status = models.PaymentStatusPartiallyRefunded
-	}
-	_ = s.paymentRepo.Update(ctx, payment)
 
 	return refundResp, nil
 }
@@ -390,11 +423,11 @@ func (s *PaymentService) checkIdempotency(ctx context.Context, key, path string,
 	return s.idempotencyStore.GetOrCreate(ctx, key, tenantID, path, reqBody, 24*time.Hour)
 }
 
-func (s *PaymentService) completeIdempotency(ctx context.Context, key string, code int, response interface{}) {
+func (s *PaymentService) completeIdempotency(ctx context.Context, key string, code int, response interface{}) error {
 	if s.idempotencyStore == nil || key == "" {
-		return
+		return nil
 	}
-	_ = s.idempotencyStore.Complete(ctx, key, code, response)
+	return s.idempotencyStore.Complete(ctx, key, code, response)
 }
 
 func (s *PaymentService) validateChargeRequest(req *models.ChargeRequest) error {

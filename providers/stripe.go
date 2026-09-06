@@ -730,7 +730,7 @@ func (p *StripeProvider) Refund(ctx context.Context, req *models.RefundRequest) 
 	}, nil
 }
 
-func (p *StripeProvider) ValidateWebhookSignature(payload []byte, signature string) error {
+func (p *StripeProvider) ValidateWebhookSignature(payload []byte, signature, timestamp string) error {
 	if p.webhookSecret == "" {
 		return fmt.Errorf("webhook secret not configured")
 	}
@@ -961,7 +961,7 @@ func (p *StripeProvider) ListSubscriptions(ctx context.Context, customerID strin
 
 func (p *StripeProvider) CreatePlan(ctx context.Context, planReq *models.Plan) (*models.Plan, error) {
 	params := &stripe.PlanParams{
-		Amount:   stripe.Int64(int64(planReq.Amount * 100)),
+		Amount:   stripe.Int64(planReq.Amount),
 		Currency: stripe.String(planReq.Currency),
 		Interval: stripe.String(string(planReq.BillingPeriod)),
 		Product: &stripe.PlanProductParams{
@@ -986,7 +986,7 @@ func (p *StripeProvider) CreatePlan(ctx context.Context, planReq *models.Plan) (
 		ID:            stripePlan.ID,
 		Name:          planReq.Name,
 		Description:   planReq.Description,
-		Amount:        float64(stripePlan.Amount) / 100,
+		Amount:        stripePlan.Amount,
 		Currency:      string(stripePlan.Currency),
 		BillingPeriod: models.BillingPeriod(stripePlan.Interval),
 		PricingType:   models.PricingTypeFixed,
@@ -1022,7 +1022,7 @@ func (p *StripeProvider) UpdatePlan(ctx context.Context, planID string, planReq 
 		ID:            stripePlan.ID,
 		Name:          planReq.Name,
 		Description:   planReq.Description,
-		Amount:        float64(stripePlan.Amount) / 100,
+		Amount:        stripePlan.Amount,
 		Currency:      string(stripePlan.Currency),
 		BillingPeriod: models.BillingPeriod(stripePlan.Interval),
 		PricingType:   models.PricingTypeFixed,
@@ -1050,7 +1050,7 @@ func (p *StripeProvider) GetPlan(ctx context.Context, planID string) (*models.Pl
 		ID:            stripePlan.ID,
 		Name:          stripePlan.Product.Name,
 		Description:   stripePlan.Product.Description,
-		Amount:        float64(stripePlan.Amount) / 100,
+		Amount:        stripePlan.Amount,
 		Currency:      string(stripePlan.Currency),
 		BillingPeriod: models.BillingPeriod(stripePlan.Interval),
 		PricingType:   models.PricingTypeFixed,
@@ -1079,7 +1079,7 @@ func (p *StripeProvider) ListPlans(ctx context.Context) ([]*models.Plan, error) 
 			ID:            stripePlan.ID,
 			Name:          stripePlan.Product.Name,
 			Description:   stripePlan.Product.Description,
-			Amount:        float64(stripePlan.Amount) / 100,
+			Amount:        stripePlan.Amount,
 			Currency:      string(stripePlan.Currency),
 			BillingPeriod: models.BillingPeriod(stripePlan.Interval),
 			PricingType:   models.PricingTypeFixed,

@@ -1249,7 +1249,7 @@ func (p *XenditProvider) mapTransactionToDispute(txn *xenditTransaction) *models
 	}
 }
 
-func (p *XenditProvider) ValidateWebhookSignature(payload []byte, signature string) error {
+func (p *XenditProvider) ValidateWebhookSignature(payload []byte, signature, timestamp string) error {
 	return crypto.ValidateHMACSHA256(payload, signature, p.webhookSecret)
 }
 

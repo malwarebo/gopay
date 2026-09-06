@@ -1303,8 +1303,8 @@ func (p *AirwallexProvider) GetDisputeStats(ctx context.Context) (*models.Disput
 	return &models.DisputeStats{}, nil
 }
 
-func (p *AirwallexProvider) ValidateWebhookSignature(payload []byte, signature string) error {
-	return crypto.ValidateHMACSHA256(payload, signature, p.webhookSecret)
+func (p *AirwallexProvider) ValidateWebhookSignature(payload []byte, signature, timestamp string) error {
+	return crypto.ValidateHMACSHA256WithTimestamp(payload, signature, p.webhookSecret, timestamp, crypto.DefaultTimestampTolerance)
 }
 
 func (p *AirwallexProvider) IsAvailable(ctx context.Context) bool {
